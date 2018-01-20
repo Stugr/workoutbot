@@ -1,1 +1,1 @@
-# workoutbot
+# Learning Go by building a workout bot

@@ -2,15 +2,24 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"math/rand"
+	"net/http"
+	"os"
 	"strings"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 // hold config
 type config struct {
-	startTime time.Time
-	endTime   time.Time
+	startTime        time.Time
+	endTime          time.Time
+	slackChannelName string
+	slackChannelID   string
+	slackAuthToken   string
+	slackWebHookURL  string
 }
 
 // hold exercises
@@ -26,14 +35,33 @@ type person struct {
 	name string
 }
 
+var conf = config{}
+
 func main() {
 	// TODO: change seed to use something else later?
 	rand.Seed(time.Now().UTC().UnixNano())
 
-	// define and initialise config
-	conf := config{}
+	// load .env
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	// define and initialise config (TODO: global variable, remove pointer?)
 	setDefaultConfig(&conf)
 	people := getPeople()
+
+	// TODO: add error handling for missing envs
+	conf.slackWebHookURL = os.Getenv("SLACK_WEBHOOKURL")
+	conf.slackAuthToken = os.Getenv("SLACK_AUTHTOKEN")
+	conf.slackChannelName = os.Getenv("SLACK_CHANNELNAME")
+
+	// get channel id from channel name
+	conf.slackChannelID = os.Getenv("SLACK_CHANNELID")
+	if conf.slackChannelID == "" {
+		// TODO: go get channel id from channel name
+		fmt.Println("Don't have a channel id")
+	}
 
 	// define exercises (TODO: move to json)
 	exercises := []exercise{
@@ -49,6 +77,9 @@ func main() {
 	fmt.Print(strings.Join(returnExercises(exercises), "\n\t"), "\n")
 	fmt.Print(strings.Join(returnPeople(people), "\n\t"), "\n")
 
+	// list exercises
+	sendSlackMessage(strings.Join(returnExercises(exercises), "\n\t") + "\n")
+
 	// pick a person and an exercise
 	//for i := 0; i < 10; i++ {
 	chosenPerson := chooseRandomPerson(people)
@@ -58,7 +89,10 @@ func main() {
 		chosenExerciseUnit += " of "
 	}
 
-	fmt.Printf("It's time for @%s to do %d %s%s\n", chosenPerson.name, chooseRandomExerciseReps(chosenExercise), chosenExerciseUnit, chosenExercise.name)
+	// build message and send
+	message := fmt.Sprintf("It's time for <@%s> to do %d %s%s\n", chosenPerson.name, chooseRandomExerciseReps(chosenExercise), chosenExerciseUnit, chosenExercise.name)
+	fmt.Print(message)
+	sendSlackMessage(message)
 	//time.Sleep(time.Second * 1)
 	//}
 }
@@ -104,8 +138,8 @@ func getPeople() []person {
 	people := []person{
 		person{"nick"},
 		person{"dave"},
-		person{"max"},
-		person{"john"},
+		person{"bob"},
+		person{"fred"},
 	}
 
 	return people
@@ -114,4 +148,20 @@ func getPeople() []person {
 // choose random person
 func chooseRandomPerson(people []person) person {
 	return people[rand.Intn(len(people))]
+}
+
+// send slack message
+func sendSlackMessage(message string) {
+	body := strings.NewReader(fmt.Sprintf("{\"text\":\"%s\"}", message))
+	req, err := http.NewRequest("POST", conf.slackWebHookURL, body)
+	if err != nil {
+		// handle err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		// handle err
+	}
+	defer resp.Body.Close()
 }

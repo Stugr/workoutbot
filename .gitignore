@@ -4,6 +4,9 @@
 *.so
 *.dylib
 
+# Env variables such as keys
+*.env
+
 # Test binary, build with `go test -c`
 *.test
 

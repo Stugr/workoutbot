@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math/rand"
 	"net/http"
@@ -49,7 +52,6 @@ func main() {
 
 	// define and initialise config (TODO: global variable, remove pointer?)
 	setDefaultConfig(&conf)
-	people := getPeople()
 
 	// TODO: add error handling for missing envs
 	conf.slackWebHookURL = os.Getenv("SLACK_WEBHOOKURL")
@@ -61,6 +63,7 @@ func main() {
 	if conf.slackChannelID == "" {
 		// TODO: go get channel id from channel name
 		fmt.Println("Don't have a channel id")
+		//https://slack.com/api/channels.list
 	}
 
 	// define exercises (TODO: move to json)
@@ -75,13 +78,15 @@ func main() {
 
 	// print possibilities
 	fmt.Print(strings.Join(returnExercises(exercises), "\n\t"), "\n")
-	fmt.Print(strings.Join(returnPeople(people), "\n\t"), "\n")
+	//fmt.Print(strings.Join(returnPeople(people), "\n\t"), "\n")
 
 	// list exercises
-	sendSlackMessage(strings.Join(returnExercises(exercises), "\n\t") + "\n")
+	//sendSlackMessage(strings.Join(returnExercises(exercises), "\n\t") + "\n")
 
 	// pick a person and an exercise
 	//for i := 0; i < 10; i++ {
+	//people := loadPeople() // load test people manually
+	people := getSlackChannelActiveMembers()
 	chosenPerson := chooseRandomPerson(people)
 	chosenExercise := chooseRandomExercise(exercises)
 	chosenExerciseUnit := chosenExercise.unit
@@ -95,6 +100,7 @@ func main() {
 	sendSlackMessage(message)
 	//time.Sleep(time.Second * 1)
 	//}
+
 }
 
 // set config defaults
@@ -133,11 +139,11 @@ func chooseRandomExerciseReps(exercise exercise) int {
 	return rand.Intn(exercise.max-exercise.min) + exercise.min
 }
 
-// get people (TODO: replace with dynamic channel members call)
-func getPeople() []person {
+// load people (TODO: remove)
+func loadPeople() []person {
 	people := []person{
-		person{"nick"},
-		person{"dave"},
+		person{"U09BCKHT4"},
+		person{"jack"},
 		person{"bob"},
 		person{"fred"},
 	}
@@ -152,16 +158,73 @@ func chooseRandomPerson(people []person) person {
 
 // send slack message
 func sendSlackMessage(message string) {
-	body := strings.NewReader(fmt.Sprintf("{\"text\":\"%s\"}", message))
-	req, err := http.NewRequest("POST", conf.slackWebHookURL, body)
+	callSlackAPI("POST", conf.slackWebHookURL, false, fmt.Sprintf("{\"text\":\"%s\"}", message))
+}
+
+// get slack channel members
+func getSlackChannelMembers() []string {
+	htmlData := callSlackAPI("GET", "https://slack.com/api/groups.info?channel="+conf.slackChannelID, true, "")
+
+	type ChannelInfo struct {
+		Group struct {
+			Members []string
+		}
+	}
+	var c ChannelInfo
+	json.Unmarshal([]byte(htmlData), &c)
+
+	return c.Group.Members
+}
+
+// get slack channel active members
+func getSlackChannelActiveMembers() []person {
+	// get channel members
+	members := getSlackChannelMembers()
+
+	type GetPresence struct {
+		Presence string
+	}
+
+	var p GetPresence
+
+	// TODO: read this https://vbauerster.github.io/2017/04/removing-items-from-a-slice-while-iterating-in-go/
+	var activeMembers []person
+
+	// loop through channel members to check their presence
+	for _, m := range members {
+		htmlData := callSlackAPI("GET", "https://slack.com/api/users.getPresence?user="+m, true, "")
+		json.Unmarshal([]byte(htmlData), &p)
+
+		if p.Presence == "active" {
+			activeMembers = append(activeMembers, person{m})
+		}
+	}
+
+	return activeMembers
+}
+
+// call slack api
+func callSlackAPI(method string, url string, auth bool, text string) []byte {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	body := strings.NewReader(text) // TODO: this needed when blank? can body just be nil?
+	req, err := http.NewRequest(method, url, body)
+	req = req.WithContext(ctx)
 	if err != nil {
 		// handle err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if auth {
+		req.Header.Set("Authorization", "Bearer "+conf.slackAuthToken)
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		// handle err
 	}
 	defer resp.Body.Close()
+
+	htmlData, err := ioutil.ReadAll(resp.Body)
+
+	return htmlData
 }

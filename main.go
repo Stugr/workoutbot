@@ -86,21 +86,27 @@ func main() {
 	// pick a person and an exercise
 	//for i := 0; i < 10; i++ {
 	//people := loadPeople() // load test people manually
+
 	people := getSlackChannelActiveMembers()
-	chosenPerson := chooseRandomPerson(people)
-	chosenExercise := chooseRandomExercise(exercises)
-	chosenExerciseUnit := chosenExercise.unit
-	if chosenExerciseUnit != "" {
-		chosenExerciseUnit += " of "
+
+	// if there is at least 1 active person
+	if len(people) > 0 {
+		chosenPerson := chooseRandomPerson(people)
+		chosenExercise := chooseRandomExercise(exercises)
+		chosenExerciseUnit := chosenExercise.unit
+		if chosenExerciseUnit != "" {
+			chosenExerciseUnit += " of "
+		}
+
+		// build message and send
+		message := fmt.Sprintf("It's time for <@%s> to do %d %s%s\n", chosenPerson.name, chooseRandomExerciseReps(chosenExercise), chosenExerciseUnit, chosenExercise.name)
+		fmt.Print(message)
+		sendSlackMessage(message)
+		//time.Sleep(time.Second * 1)
+	} else {
+		fmt.Print("Nobody is active!")
 	}
-
-	// build message and send
-	message := fmt.Sprintf("It's time for <@%s> to do %d %s%s\n", chosenPerson.name, chooseRandomExerciseReps(chosenExercise), chosenExerciseUnit, chosenExercise.name)
-	fmt.Print(message)
-	sendSlackMessage(message)
-	//time.Sleep(time.Second * 1)
 	//}
-
 }
 
 // set config defaults
@@ -153,7 +159,10 @@ func loadPeople() []person {
 
 // choose random person
 func chooseRandomPerson(people []person) person {
-	return people[rand.Intn(len(people))]
+	if len(people) > 0 {
+		return people[rand.Intn(len(people))]
+	}
+	return person{}
 }
 
 // send slack message
@@ -162,6 +171,7 @@ func sendSlackMessage(message string) {
 }
 
 // get slack channel members
+// TODO: handle 0 members
 func getSlackChannelMembers() []string {
 	htmlData := callSlackAPI("GET", "https://slack.com/api/groups.info?channel="+conf.slackChannelID, true, "")
 
@@ -180,23 +190,24 @@ func getSlackChannelMembers() []string {
 func getSlackChannelActiveMembers() []person {
 	// get channel members
 	members := getSlackChannelMembers()
-
-	type GetPresence struct {
-		Presence string
-	}
-
-	var p GetPresence
-
-	// TODO: read this https://vbauerster.github.io/2017/04/removing-items-from-a-slice-while-iterating-in-go/
 	var activeMembers []person
 
-	// loop through channel members to check their presence
-	for _, m := range members {
-		htmlData := callSlackAPI("GET", "https://slack.com/api/users.getPresence?user="+m, true, "")
-		json.Unmarshal([]byte(htmlData), &p)
+	// if there are channel members
+	if len(members) > 0 {
+		type GetPresence struct {
+			Presence string
+		}
 
-		if p.Presence == "active" {
-			activeMembers = append(activeMembers, person{m})
+		var p GetPresence
+
+		// loop through channel members to check their presence
+		for _, m := range members {
+			htmlData := callSlackAPI("GET", "https://slack.com/api/users.getPresence?user="+m, true, "")
+			json.Unmarshal([]byte(htmlData), &p)
+
+			if p.Presence == "active" {
+				activeMembers = append(activeMembers, person{m})
+			}
 		}
 	}
 

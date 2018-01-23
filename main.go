@@ -72,15 +72,17 @@ func main() {
 	// TODO: add error handling for missing envs
 	conf.slackWebHookURL = os.Getenv("SLACK_WEBHOOKURL")
 	conf.slackAuthToken = os.Getenv("SLACK_AUTHTOKEN")
-	conf.slackChannelName = os.Getenv("SLACK_CHANNELNAME")
+	//conf.slackChannelName = os.Getenv("SLACK_CHANNELNAME")
 
 	// get channel id from channel name
-	// TODO: save straight to channel
 	conf.slackChannelID = os.Getenv("SLACK_CHANNELID")
 	if conf.slackChannelID == "" {
-		// TODO: go get channel id from channel name
-		fmt.Println("Don't have a channel id")
-		//https://slack.com/api/channels.list
+		log.Println("SLACK_CHANNELID missing, using SLACK_CHANNELNAME to lookup ID instead")
+		if conf.slackChannelName == "" {
+			log.Fatal("SLACK_CHANNELNAME also not set")
+		}
+		// TODO: store this for the user maybe
+		conf.slackChannelID = getSlackChannelIDFromName(conf.slackChannelName)
 	}
 
 	// define exercises (TODO: move to json)
@@ -127,7 +129,7 @@ func main() {
 		// build message and send
 		message := fmt.Sprintf("It's time for <@%s> to do %d %s%s\n", chosenUser.id, chooseRandomExerciseReps(chosenExercise), chosenExerciseUnit, chosenExercise.name)
 		fmt.Print(message)
-		sendSlackMessage(message)
+		//sendSlackMessage(message)
 
 	} else {
 		fmt.Print("Nobody is active!")
@@ -201,12 +203,12 @@ func getSlackChannelMembers(slackChannelID string) []user {
 
 	htmlData := callSlackAPI("GET", "https://slack.com/api/groups.info?channel="+slackChannelID, true, "")
 
-	type ChannelInfo struct {
+	type channelInfo struct {
 		Group struct {
 			Members []string
 		}
 	}
-	var c ChannelInfo
+	var c channelInfo
 	json.Unmarshal([]byte(htmlData), &c)
 
 	for _, u := range c.Group.Members {
@@ -220,11 +222,11 @@ func getSlackChannelMembers(slackChannelID string) []user {
 func updateSlackActiveUsers(users *[]user) {
 	// if there are channel members
 	if len(*users) > 0 {
-		type GetPresence struct {
+		type getPresence struct {
 			Presence string
 		}
 
-		var p GetPresence
+		var p getPresence
 
 		// loop through channel members to check their presence
 		for i := range *users {
@@ -249,6 +251,30 @@ func (c channel) getActiveUsers() (activeUsers []user) {
 	}
 
 	return activeUsers
+}
+
+// get slack channel id from name
+func getSlackChannelIDFromName(slackChannelName string) (slackChannelID string) {
+	htmlData := callSlackAPI("GET", "https://slack.com/api/groups.list", true, "")
+
+	type channelList struct {
+		Ok     string
+		Groups []struct {
+			ID   string
+			Name string
+		}
+	}
+	var cl channelList
+
+	json.Unmarshal([]byte(htmlData), &cl)
+
+	for _, c := range cl.Groups {
+		if c.Name == slackChannelName {
+			slackChannelID = c.ID
+		}
+	}
+
+	return slackChannelID
 }
 
 // call slack api

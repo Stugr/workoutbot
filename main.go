@@ -100,15 +100,18 @@ func main() {
 	var channel channel
 	channel.id = conf.slackChannelID
 
-	// save users
-	channel.users = getSlackChannelMembers(channel.id)
-	fmt.Print(strings.Join(returnUsers(channel.users), "\n\t"), "\n")
-
 	// pick a person and an exercise
 	//for i := 0; i < 5; i++ {
 
+	// save users
+	// TODO: don't wipe this out between runs (in case we want to store more info such as name)
+	channel.users = getSlackChannelMembers(channel.id)
+
 	// update users status
 	updateSlackActiveUsers(&channel.users)
+
+	fmt.Print(strings.Join(returnUsers(channel.users, false), "\n\t"), "\n")
+	fmt.Print(strings.Join(returnUsers(channel.users, true), "\n\t"), "\n")
 
 	// choose a user
 	chosenUser := channel.getRandomActiveUser()
@@ -150,10 +153,16 @@ func returnExercises(exercises []exercise) []string {
 }
 
 // return users (for printing to console/channel)
-func returnUsers(users []user) []string {
-	returnSlice := []string{"Possible users:"}
-	for _, p := range users {
-		returnSlice = append(returnSlice, p.id)
+func returnUsers(users []user, onlyActiveUsers bool) []string {
+	msg := "All users:"
+	if onlyActiveUsers {
+		msg = "Active users:"
+	}
+	returnSlice := []string{msg}
+	for _, u := range users {
+		if !onlyActiveUsers || (onlyActiveUsers && u.active) {
+			returnSlice = append(returnSlice, u.id)
+		}
 	}
 
 	return returnSlice

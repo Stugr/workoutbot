@@ -19,7 +19,7 @@ import (
 type config struct {
 	startTime        time.Time
 	endTime          time.Time
-	slackChannelName string
+	slackChannelName string // TODO: add group version
 	slackChannelID   string
 	slackAuthToken   string
 	slackWebHookURL  string
@@ -33,9 +33,25 @@ type exercise struct {
 	unit string
 }
 
-// hold people
-type person struct {
-	name string
+// hold users
+type user struct {
+	id     string
+	active bool
+}
+
+// construct new user with defaults
+func newUser(id string) user {
+	return user{
+		id:     id,
+		active: false,
+	}
+}
+
+// hold channel info
+type channel struct {
+	id    string
+	name  string
+	users []user
 }
 
 var conf = config{}
@@ -59,6 +75,7 @@ func main() {
 	conf.slackChannelName = os.Getenv("SLACK_CHANNELNAME")
 
 	// get channel id from channel name
+	// TODO: save straight to channel
 	conf.slackChannelID = os.Getenv("SLACK_CHANNELID")
 	if conf.slackChannelID == "" {
 		// TODO: go get channel id from channel name
@@ -76,22 +93,28 @@ func main() {
 	fmt.Println("Start time:", conf.startTime)
 	fmt.Println("End time:", conf.endTime)
 
-	// print possibilities
-	fmt.Print(strings.Join(returnExercises(exercises), "\n\t"), "\n")
-	//fmt.Print(strings.Join(returnPeople(people), "\n\t"), "\n")
-
 	// list exercises
+	//fmt.Print(strings.Join(returnExercises(exercises), "\n\t"), "\n")
 	//sendSlackMessage(strings.Join(returnExercises(exercises), "\n\t") + "\n")
 
+	var channel channel
+	channel.id = conf.slackChannelID
+
+	// save users
+	channel.users = getSlackChannelMembers(channel.id)
+	fmt.Print(strings.Join(returnUsers(channel.users), "\n\t"), "\n")
+
 	// pick a person and an exercise
-	//for i := 0; i < 10; i++ {
-	//people := loadPeople() // load test people manually
+	//for i := 0; i < 5; i++ {
 
-	people := getSlackChannelActiveMembers()
+	// update users status
+	updateSlackActiveUsers(&channel.users)
 
-	// if there is at least 1 active person
-	if len(people) > 0 {
-		chosenPerson := chooseRandomPerson(people)
+	// choose a user
+	chosenUser := channel.getRandomActiveUser()
+
+	// if we were able to choose a random user
+	if (user{}) != chosenUser {
 		chosenExercise := chooseRandomExercise(exercises)
 		chosenExerciseUnit := chosenExercise.unit
 		if chosenExerciseUnit != "" {
@@ -99,13 +122,14 @@ func main() {
 		}
 
 		// build message and send
-		message := fmt.Sprintf("It's time for <@%s> to do %d %s%s\n", chosenPerson.name, chooseRandomExerciseReps(chosenExercise), chosenExerciseUnit, chosenExercise.name)
+		message := fmt.Sprintf("It's time for <@%s> to do %d %s%s\n", chosenUser.id, chooseRandomExerciseReps(chosenExercise), chosenExerciseUnit, chosenExercise.name)
 		fmt.Print(message)
 		sendSlackMessage(message)
-		//time.Sleep(time.Second * 1)
+
 	} else {
 		fmt.Print("Nobody is active!")
 	}
+	//time.Sleep(time.Second * 1)
 	//}
 }
 
@@ -125,11 +149,11 @@ func returnExercises(exercises []exercise) []string {
 	return returnSlice
 }
 
-// return people (for printing to console/channel)
-func returnPeople(people []person) []string {
-	returnSlice := []string{"Possible people:"}
-	for _, p := range people {
-		returnSlice = append(returnSlice, p.name)
+// return users (for printing to console/channel)
+func returnUsers(users []user) []string {
+	returnSlice := []string{"Possible users:"}
+	for _, p := range users {
+		returnSlice = append(returnSlice, p.id)
 	}
 
 	return returnSlice
@@ -145,24 +169,13 @@ func chooseRandomExerciseReps(exercise exercise) int {
 	return rand.Intn(exercise.max-exercise.min) + exercise.min
 }
 
-// load people (TODO: remove)
-func loadPeople() []person {
-	people := []person{
-		person{"U09BCKHT4"},
-		person{"jack"},
-		person{"bob"},
-		person{"fred"},
+// choose random user from channel struct
+func (c channel) getRandomActiveUser() user {
+	activeUsers := c.getActiveUsers()
+	if len(activeUsers) > 0 {
+		return activeUsers[rand.Intn(len(activeUsers))]
 	}
-
-	return people
-}
-
-// choose random person
-func chooseRandomPerson(people []person) person {
-	if len(people) > 0 {
-		return people[rand.Intn(len(people))]
-	}
-	return person{}
+	return user{}
 }
 
 // send slack message
@@ -172,8 +185,12 @@ func sendSlackMessage(message string) {
 
 // get slack channel members
 // TODO: handle 0 members
-func getSlackChannelMembers() []string {
-	htmlData := callSlackAPI("GET", "https://slack.com/api/groups.info?channel="+conf.slackChannelID, true, "")
+// TODO: handle channel/group (different api calls)
+// TODO: handle wrong channel ID
+func getSlackChannelMembers(slackChannelID string) []user {
+	var members []user
+
+	htmlData := callSlackAPI("GET", "https://slack.com/api/groups.info?channel="+slackChannelID, true, "")
 
 	type ChannelInfo struct {
 		Group struct {
@@ -183,17 +200,17 @@ func getSlackChannelMembers() []string {
 	var c ChannelInfo
 	json.Unmarshal([]byte(htmlData), &c)
 
-	return c.Group.Members
+	for _, u := range c.Group.Members {
+		members = append(members, newUser(u))
+	}
+
+	return members
 }
 
-// get slack channel active members
-func getSlackChannelActiveMembers() []person {
-	// get channel members
-	members := getSlackChannelMembers()
-	var activeMembers []person
-
+// update slack active users
+func updateSlackActiveUsers(users *[]user) {
 	// if there are channel members
-	if len(members) > 0 {
+	if len(*users) > 0 {
 		type GetPresence struct {
 			Presence string
 		}
@@ -201,17 +218,28 @@ func getSlackChannelActiveMembers() []person {
 		var p GetPresence
 
 		// loop through channel members to check their presence
-		for _, m := range members {
-			htmlData := callSlackAPI("GET", "https://slack.com/api/users.getPresence?user="+m, true, "")
+		for i := range *users {
+			htmlData := callSlackAPI("GET", "https://slack.com/api/users.getPresence?user="+(*users)[i].id, true, "")
 			json.Unmarshal([]byte(htmlData), &p)
 
 			if p.Presence == "active" {
-				activeMembers = append(activeMembers, person{m})
+				(*users)[i].active = true
+			} else {
+				(*users)[i].active = false
 			}
 		}
 	}
+}
 
-	return activeMembers
+// get active users from channel struct
+func (c channel) getActiveUsers() (activeUsers []user) {
+	for _, u := range c.users {
+		if u.active {
+			activeUsers = append(activeUsers, u)
+		}
+	}
+
+	return activeUsers
 }
 
 // call slack api

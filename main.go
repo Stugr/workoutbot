@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,12 +18,16 @@ import (
 
 // hold config
 type config struct {
-	startTime        time.Time
-	endTime          time.Time
 	slackChannelName string // TODO: add group version
 	slackChannelID   string
 	slackAuthToken   string
 	slackWebHookURL  string
+	minSleep         int
+	maxSleep         int
+	eachDayStartHour string
+	eachDayEndHour   string
+	eachDayStartTime time.Time
+	eachDayEndTime   time.Time
 }
 
 // hold exercises
@@ -90,10 +95,10 @@ func main() {
 		exercise{"pushups", 10, 20, ""},
 		exercise{"planking", 30, 60, "seconds"},
 		exercise{"starjumps", 30, 45, ""},
+		exercise{"wall sit", 30, 60, "seconds"},
+		exercise{"chair dips", 15, 30, ""},
+		exercise{"calf raises", 15, 30, ""},
 	}
-
-	fmt.Println("Start time:", conf.startTime)
-	fmt.Println("End time:", conf.endTime)
 
 	// list exercises
 	//fmt.Print(strings.Join(returnExercises(exercises), "\n\t"), "\n")
@@ -102,46 +107,79 @@ func main() {
 	var channel channel
 	channel.id = conf.slackChannelID
 
-	// pick a person and an exercise
-	//for i := 0; i < 5; i++ {
+	// loop forever (TODO: change to not sleep but instead exit and start again on a schedule)
+	for {
+		// pick a sleep interval
+		sleepInterval := getRandomBetweenRange(conf.minSleep, conf.maxSleep)
 
-	// save users
-	// TODO: don't wipe this out between runs (in case we want to store more info such as name)
-	channel.users = getSlackChannelMembers(channel.id)
+		// is time between start and end hour
+		now := time.Now()
+		if now.After(conf.eachDayStartTime) && now.Before(conf.eachDayEndTime) {
 
-	// update users status
-	updateSlackActiveUsers(&channel.users)
+			// save users
+			// TODO: don't wipe this out between runs (in case we want to store more info such as name)
+			channel.users = getSlackChannelMembers(channel.id)
 
-	fmt.Print(strings.Join(returnUsers(channel.users, false), "\n\t"), "\n")
-	fmt.Print(strings.Join(returnUsers(channel.users, true), "\n\t"), "\n")
+			// update users status
+			updateSlackActiveUsers(&channel.users)
 
-	// choose a user
-	chosenUser := channel.getRandomActiveUser()
+			fmt.Print(strings.Join(returnUsers(channel.users, false), "\n\t"), "\n")
+			fmt.Print(strings.Join(returnUsers(channel.users, true), "\n\t"), "\n")
 
-	// if we were able to choose a random user
-	if (user{}) != chosenUser {
-		chosenExercise := chooseRandomExercise(exercises)
-		chosenExerciseUnit := chosenExercise.unit
-		if chosenExerciseUnit != "" {
-			chosenExerciseUnit += " of "
+			// choose a user
+			chosenUser := channel.getRandomActiveUser()
+
+			// if we were able to choose a random user
+			if (user{}) != chosenUser {
+				chosenExercise := chooseRandomExercise(exercises)
+				chosenExerciseUnit := chosenExercise.unit
+				if chosenExerciseUnit != "" {
+					chosenExerciseUnit += " of "
+				}
+
+				// build message and send
+				message := fmt.Sprintf("It's time for <@%s> to do %d %s%s. Next exercise in %d\n", chosenUser.id, getRandomBetweenRange(chosenExercise.min, chosenExercise.max), chosenExerciseUnit, chosenExercise.name, sleepInterval)
+				fmt.Print(message)
+				//sendSlackMessage(message)
+
+			} else {
+				fmt.Print("Nobody is active!")
+			}
+		} else {
+			fmt.Println("Not between start and end times")
+			fmt.Println("Current time: ", now)
+			fmt.Println("Start time: ", conf.eachDayStartTime)
+			fmt.Println("End time: ", conf.eachDayEndTime)
+			fmt.Println("Sleeping for ", sleepInterval)
 		}
 
-		// build message and send
-		message := fmt.Sprintf("It's time for <@%s> to do %d %s%s\n", chosenUser.id, chooseRandomExerciseReps(chosenExercise), chosenExerciseUnit, chosenExercise.name)
-		fmt.Print(message)
-		//sendSlackMessage(message)
-
-	} else {
-		fmt.Print("Nobody is active!")
+		// sleep
+		time.Sleep(time.Minute * time.Duration(sleepInterval))
 	}
-	//time.Sleep(time.Second * 1)
-	//}
 }
 
 // set config defaults
+// TODO: move to new constructor
 func setDefaultConfig(c *config) {
-	c.startTime = time.Now()
-	c.endTime = (c.startTime).Add(time.Minute * time.Duration(60))
+	//c.endTime = (c.startTime).Add(time.Minute * time.Duration(60))
+	c.minSleep = 55
+	c.maxSleep = 95
+	c.eachDayStartHour = "09:30"
+	c.eachDayEndHour = "23:20"
+
+	now := time.Now()
+
+	sh := strings.Split(c.eachDayStartHour, ":")
+	h, _ := strconv.Atoi(sh[0])
+	m, _ := strconv.Atoi(sh[1])
+
+	c.eachDayStartTime = time.Date(now.Year(), now.Month(), now.Day(), h, m, 0, 0, now.Location())
+
+	sh = strings.Split(c.eachDayEndHour, ":")
+	h, _ = strconv.Atoi(sh[0])
+	m, _ = strconv.Atoi(sh[1])
+
+	c.eachDayEndTime = time.Date(now.Year(), now.Month(), now.Day(), h, m, 0, 0, now.Location())
 }
 
 // return exercises (for printing to console/channel)
@@ -175,12 +213,13 @@ func chooseRandomExercise(exercises []exercise) exercise {
 	return exercises[rand.Intn(len(exercises))]
 }
 
-// choose random exercise reps from range
-func chooseRandomExerciseReps(exercise exercise) int {
-	return rand.Intn(exercise.max-exercise.min) + exercise.min
+// get random between range
+func getRandomBetweenRange(min, max int) int {
+	return rand.Intn(max-min) + min
 }
 
 // choose random user from channel struct
+// TODO: handle user choice of range (eg. 1-2 users, 3 users, @channel)
 func (c channel) getRandomActiveUser() user {
 	activeUsers := c.getActiveUsers()
 	if len(activeUsers) > 0 {
@@ -271,6 +310,7 @@ func getSlackChannelIDFromName(slackChannelName string) (slackChannelID string) 
 	for _, c := range cl.Groups {
 		if c.Name == slackChannelName {
 			slackChannelID = c.ID
+			// TODO: exit
 		}
 	}
 

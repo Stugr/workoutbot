@@ -147,10 +147,10 @@ func main() {
 			}
 		} else {
 			fmt.Println("Not between start and end times")
-			fmt.Println("Current time: ", now)
-			fmt.Println("Start time: ", conf.eachDayStartTime)
-			fmt.Println("End time: ", conf.eachDayEndTime)
-			fmt.Println("Sleeping for ", sleepInterval)
+			fmt.Println("Current time:", now)
+			fmt.Println("Start time:", conf.eachDayStartTime)
+			fmt.Println("End time:", conf.eachDayEndTime)
+			fmt.Println("Sleeping for", sleepInterval)
 		}
 
 		// sleep
@@ -310,7 +310,7 @@ func getSlackChannelIDFromName(slackChannelName string) (slackChannelID string) 
 	for _, c := range cl.Groups {
 		if c.Name == slackChannelName {
 			slackChannelID = c.ID
-			// TODO: exit
+			break
 		}
 	}
 
